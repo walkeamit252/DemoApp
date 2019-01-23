@@ -4,11 +4,7 @@ import android.content.Context;
 import android.os.Bundle;
 import android.support.v4.app.FragmentActivity;
 import android.util.Log;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.widget.TextView;
 import android.widget.Toast;
-
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -16,16 +12,16 @@ import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
-import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.maps.android.clustering.Cluster;
 import com.google.maps.android.clustering.ClusterItem;
 import com.google.maps.android.clustering.ClusterManager;
 import com.google.maps.android.clustering.view.DefaultClusterRenderer;
-
 import java.util.List;
 
+import app.com.mapdemo.model.MarkerDetailRequest;
 import app.com.mapdemo.model.MarkerItem;
+import app.com.mapdemo.model.MarkerItemParent;
 import app.com.mapdemo.network.ApiClient;
 import app.com.mapdemo.network.ApiInterface;
 import retrofit2.Call;
@@ -38,42 +34,31 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private GoogleMap mMap;
     private ClusterManager<StringClusterItem> mClusterManager;
     private ApiInterface apiService;
+    SupportMapFragment mapFragment;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
         apiService = ApiClient.getClient().create(ApiInterface.class);
-        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
+
+        mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
+        if( mapFragment != null)
         mapFragment.getMapAsync(this);
     }
 
 
     @Override
     public void onMapReady(GoogleMap googleMap) {
+        fetMarkerList();
         mMap = googleMap;
         mMap.getUiSettings().setRotateGesturesEnabled(false);
         mClusterManager = new ClusterManager<>(this, mMap);
         mMap.setOnMarkerClickListener(mClusterManager);
-
         final CustomClusterRenderer renderer = new CustomClusterRenderer(this, mMap, mClusterManager);
-
         mClusterManager.setRenderer(renderer);
-
-       /* mClusterManager.getMarkerCollection()
-                .setOnInfoWindowAdapter(new CustomInfoViewAdapter(LayoutInflater.from(this)));
-
-        mMap.setInfoWindowAdapter(mClusterManager.getMarkerManager());*/
-
         mMap.setOnCameraChangeListener(mClusterManager);
-
-        fetMarkerList();
-
-//        LatLng pune = new LatLng(18.5263219, 73.7621671);
-//        mMap.moveCamera(CameraUpdateFactory.newLatLng(pune));
-
-
         mClusterManager.setOnClusterClickListener(
                 new ClusterManager.OnClusterClickListener<StringClusterItem>() {
                     @Override
@@ -87,7 +72,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 new ClusterManager.OnClusterItemClickListener<StringClusterItem>() {
                     @Override
                     public boolean onClusterItemClick(StringClusterItem clusterItem) {
-                        Toast.makeText(MapsActivity.this, "Cluster item click", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MapsActivity.this, clusterItem.markerItem.getId().toString(), Toast.LENGTH_SHORT).show();
+                       fetMarkerDetails(clusterItem.markerItem.getId().toString());
                         return false;
                     }
                 });
@@ -95,8 +81,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
 
     public class CustomClusterRenderer extends DefaultClusterRenderer<StringClusterItem> {
-        public CustomClusterRenderer(Context context, GoogleMap map,
-                                     ClusterManager<MapsActivity.StringClusterItem> clusterManager) {
+        CustomClusterRenderer(Context context, GoogleMap map,
+                              ClusterManager<MapsActivity.StringClusterItem> clusterManager) {
             super(context, map, clusterManager);
         }
 
@@ -121,7 +107,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         final String title;
         final LatLng latLng;
 
-        public StringClusterItem(MarkerItem markerItem) {
+        final MarkerItem markerItem;
+        StringClusterItem(MarkerItem markerItem) {
+            this.markerItem=markerItem;
             this.title = markerItem.getName();
             this.latLng = new LatLng(Double.parseDouble(markerItem.getLat()), Double.parseDouble(markerItem.getLon()));
         }
@@ -133,7 +121,57 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
 
-    public class CustomInfoViewAdapter implements GoogleMap.InfoWindowAdapter {
+    public void fetMarkerDetails(String id) {
+        MarkerDetailRequest markerDetailRequest=new MarkerDetailRequest();
+        markerDetailRequest.setEquipmentId(id);
+        Call<MarkerItemParent> call = apiService.getMarkerDetail(markerDetailRequest);
+        call.enqueue(new Callback<MarkerItemParent>() {
+            @Override
+            public void onResponse(Call<MarkerItemParent> call, Response<MarkerItemParent> response) {
+                if (response.isSuccessful()) {
+                    Log.i(TAG, "onResponse: " + response.body());
+                }
+            }
+
+            @Override
+            public void onFailure(Call<MarkerItemParent> call, Throwable t) {
+                Log.i(TAG, "onResponse: " + t.getLocalizedMessage());
+            }
+        });
+
+    }
+
+
+    public void fetMarkerList() {
+
+        Call<List<MarkerItem>> call = apiService.getMarkerList();
+        call.enqueue(new Callback<List<MarkerItem>>() {
+            @Override
+            public void onResponse(Call<List<MarkerItem>> call, Response<List<MarkerItem>> response) {
+                if (response.isSuccessful()) {
+                    if (response.body() != null && response.body().size() != 0) {
+                        LatLng latLng = new LatLng(Double.parseDouble(response.body().get(0).getLat()),
+                                Double.parseDouble(response.body().get(0).getLon()));
+                        for (MarkerItem item : response.body()) {
+                            mClusterManager.addItem(new StringClusterItem(item));
+                        }
+                        mMap.moveCamera(CameraUpdateFactory.newLatLng(latLng));
+                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 4));
+
+
+                    }
+                }
+            }
+
+            @Override
+            public void onFailure(Call<List<MarkerItem>> call, Throwable t) {
+                Log.i(TAG, "onResponse: " + t.getLocalizedMessage());
+            }
+        });
+
+    }
+
+   /* public class CustomInfoViewAdapter implements GoogleMap.InfoWindowAdapter {
 
         private final LayoutInflater mInflater;
 
@@ -154,37 +192,14 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             ((TextView) popup.findViewById(R.id.title)).setText(marker.getSnippet());
             return popup;
         }
-    }
+    }*/
 
 
-    public void fetMarkerList() {
 
-        Call<List<MarkerItem>> call = apiService.getMarkerList();
-        call.enqueue(new Callback<List<MarkerItem>>() {
-            @Override
-            public void onResponse(Call<List<MarkerItem>> call, Response<List<MarkerItem>> response) {
-                if (response.isSuccessful()) {
-                    Log.i(TAG, "onResponse: " + response.body().size());
-                    if (response != null && response.body() != null && response.body().size() != 0) {
-                        LatLng latLng = new LatLng(Double.parseDouble(response.body().get(0).getLat()),
-                                Double.parseDouble(response.body().get(0).getLon()));
-                        for (MarkerItem item : response.body()) {
-                            mClusterManager.addItem(new StringClusterItem(item));
-                        }
-                        mMap.moveCamera(CameraUpdateFactory.newLatLng(latLng));
-                    }
-                }
-            }
-
-            @Override
-            public void onFailure(Call<List<MarkerItem>> call, Throwable t) {
-                Log.i(TAG, "onResponse: " + t.getLocalizedMessage());
-            }
-        });
-
-    }
 
 }
+
+
 
 
 
@@ -219,3 +234,11 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
         final LatLng latLng4 = new LatLng(18.5263219, 73.7621671);
         mClusterManager.addItem(new StringClusterItem("Yawele #", latLng4));*/
+
+
+  //FOR POPUP
+
+ /* mClusterManager.getMarkerCollection()
+                .setOnInfoWindowAdapter(new CustomInfoViewAdapter(LayoutInflater.from(this)));
+
+        mMap.setInfoWindowAdapter(mClusterManager.getMarkerManager());*/
